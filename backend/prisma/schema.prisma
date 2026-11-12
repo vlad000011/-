@@ -1,0 +1,159 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum RoleName {
+  USER
+  MODERATOR
+  ADMIN
+}
+
+enum ListingStatus {
+  ACTIVE
+  HIDDEN
+  EXCHANGED
+}
+
+enum ItemCondition {
+  NEW
+  LIKE_NEW
+  GOOD
+  FAIR
+}
+
+model User {
+  id           String @id @default(uuid())
+  email        String @unique
+  passwordHash String
+  name         String
+  bio          String?
+  isBlocked    Boolean @default(false)
+  createdAt    DateTime @default(now())
+  roles        UserRole[]
+  listings     Listing[]
+  favorites    Favorite[]
+  sentMessages Message[] @relation("SentMessages")
+  conversations ConversationMember[]
+  reports      Report[] @relation("Reporter")
+  auditLogs    AuditLog[]
+  refreshTokens RefreshToken[]
+}
+
+model Role {
+  id    String @id @default(uuid())
+  name  RoleName @unique
+  users UserRole[]
+}
+
+model UserRole {
+  userId String
+  roleId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  @@id([userId, roleId])
+}
+
+model Category {
+  id String @id @default(uuid())
+  name String @unique
+  listings Listing[]
+}
+
+model Listing {
+  id String @id @default(uuid())
+  title String
+  description String
+  condition ItemCondition @default(GOOD)
+  status ListingStatus @default(ACTIVE)
+  exchangeFor String?
+  city String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ownerId String
+  categoryId String
+  owner User @relation(fields: [ownerId], references: [id])
+  category Category @relation(fields: [categoryId], references: [id])
+  images ListingImage[]
+  favorites Favorite[]
+  reports Report[]
+  @@index([title])
+  @@index([categoryId, status])
+  @@index([createdAt])
+}
+
+model ListingImage {
+  id String @id @default(uuid())
+  url String
+  listingId String
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+}
+
+model Favorite {
+  userId String
+  listingId String
+  createdAt DateTime @default(now())
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  @@id([userId, listingId])
+}
+
+model Conversation {
+  id String @id @default(uuid())
+  createdAt DateTime @default(now())
+  members ConversationMember[]
+  messages Message[]
+  @@unique([id])
+}
+
+model ConversationMember {
+  conversationId String
+  userId String
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@id([conversationId, userId])
+}
+
+model Message {
+  id String @id @default(uuid())
+  body String
+  createdAt DateTime @default(now())
+  conversationId String
+  senderId String
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender User @relation("SentMessages", fields: [senderId], references: [id])
+  @@index([conversationId, createdAt])
+}
+
+model Report {
+  id String @id @default(uuid())
+  reason String
+  status String @default("OPEN")
+  createdAt DateTime @default(now())
+  reporterId String
+  listingId String
+  reporter User @relation("Reporter", fields: [reporterId], references: [id])
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+}
+
+model AuditLog {
+  id String @id @default(uuid())
+  action String
+  details String?
+  createdAt DateTime @default(now())
+  userId String?
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+  @@index([createdAt])
+}
+
+model RefreshToken {
+  id String @id @default(uuid())
+  tokenHash String @unique
+  expiresAt DateTime
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}

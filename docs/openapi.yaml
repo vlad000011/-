@@ -1,0 +1,64 @@
+openapi: 3.0.3
+info:
+  title: SwapSpace API
+  version: 1.0.0
+servers:
+  - url: http://localhost:3000
+paths:
+  /api/health:
+    get:
+      summary: Проверка работоспособности
+      responses:
+        '200': { description: API доступно }
+  /api/auth/register:
+    post:
+      summary: Регистрация
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, name]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, minLength: 8 }
+                name: { type: string }
+      responses:
+        '201': { description: Аккаунт создан }
+        '409': { description: Email занят }
+  /api/auth/login:
+    post:
+      summary: Вход
+      responses:
+        '200': { description: JWT токены }
+        '401': { description: Неверные учётные данные }
+  /api/listings:
+    get:
+      summary: Каталог с поиском, фильтрацией и пагинацией
+      parameters:
+        - { in: query, name: q, schema: { type: string } }
+        - { in: query, name: categoryId, schema: { type: string } }
+        - { in: query, name: page, schema: { type: integer } }
+        - { in: query, name: limit, schema: { type: integer } }
+      responses:
+        '200': { description: Список объявлений }
+    post:
+      summary: Создать объявление
+      security: [{ bearerAuth: [] }]
+      responses:
+        '201': { description: Объявление создано }
+  /api/listings/{id}:
+    get:
+      summary: Получить объявление
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Объявление }
+        '404': { description: Не найдено }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
