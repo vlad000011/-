@@ -78,8 +78,10 @@ export async function issueTokens(user: {
     process.env.REFRESH_TOKEN_TTL || "7d"
   ) as jwt.SignOptions["expiresIn"];
 
+  // A unique JWT ID guarantees a new refresh token even when rotation
+  // happens within the same second (JWT timestamps otherwise may be identical).
   const refreshToken = jwt.sign(
-    { sub: user.id },
+    { sub: user.id, jti: crypto.randomUUID() },
     refreshSecret,
     { expiresIn: refreshExpiresIn }
   );
