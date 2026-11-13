@@ -394,6 +394,14 @@ app.get("/api/favorites", requireAuth, wrap(async (req: AuthRequest, res) =>
 ));
 
 app.post("/api/favorites/:listingId", requireAuth, wrap(async (req: AuthRequest, res) => {
+  const listing = await prisma.listing.findUnique({
+    where: { id: req.params.listingId },
+    select: { id: true, status: true }
+  });
+  if (!listing || listing.status !== "ACTIVE") {
+    return res.status(404).json({ error: "Активное объявление не найдено" });
+  }
+
   await prisma.favorite.upsert({
     where: {
       userId_listingId: {
@@ -519,8 +527,26 @@ app.post("/api/conversations/:id/messages", requireAuth, wrap(async (req: AuthRe
 
 app.post("/api/listings/:id/reports", requireAuth, wrap(async (req: AuthRequest, res) => {
   const { reason } = z.object({
-    reason: z.string().min(5).max(500)
+    reason: z.string().trim().min(5).max(500)
   }).parse(req.body);
+
+  const listing = await prisma.listing.findUnique({
+    where: { id: req.params.id },
+    select: { id: true, ownerId: true, status: true }
+  });
+  if (!listing || listing.status === "HIDDEN") {
+    return res.status(404).json({ error: "Объявление не найдено" });
+  }
+  if (listing.ownerId === req.user!.id) {
+    return res.status(400).json({ error: "Нельзя пожаловаться на собственное объявление" });
+  }
+
+  const existingReport = await prisma.report.findFirst({
+    where: { listingId: listing.id, reporterId: req.user!.id, status: "OPEN" }
+  });
+  if (existingReport) {
+    return res.status(409).json({ error: "Вы уже отправили жалобу на это объявление" });
+  }
 
   const report = await prisma.report.create({
     data: {
