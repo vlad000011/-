@@ -629,18 +629,31 @@ app.patch("/api/admin/users/:id", requireAuth, allowRoles("ADMIN"), wrap(async (
 }));
 
 app.get("/api/admin/stats", requireAuth, allowRoles("MODERATOR", "ADMIN"), wrap(async (_req, res) => {
-  const [users, listings, active, reports] = await Promise.all([
+  const since = new Date();
+  since.setDate(since.getDate() - 6);
+  since.setHours(0, 0, 0, 0);
+  const [users, listings, active, blocked, reports, recentListings, categories] = await Promise.all([
     prisma.user.count(),
     prisma.listing.count(),
     prisma.listing.count({ where: { status: "ACTIVE" } }),
-    prisma.report.count({ where: { status: "OPEN" } })
+    prisma.listing.count({ where: { status: "BLOCKED" } }),
+    prisma.report.count({ where: { status: "OPEN" } }),
+    prisma.listing.findMany({ where: { createdAt: { gte: since } }, select: { createdAt: true } }),
+    prisma.category.findMany({
+      select: { id: true, name: true, _count: { select: { listings: { where: { status: "ACTIVE" } } } } },
+      orderBy: { name: "asc" }
+    })
   ]);
-
+  const daily = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(since);
+    date.setDate(since.getDate() + index);
+    const key = date.toISOString().slice(0, 10);
+    return { date: key, label: date.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" }), count: recentListings.filter(x => x.createdAt.toISOString().slice(0, 10) === key).length };
+  });
   res.json({
-    users,
-    listings,
-    activeListings: active,
-    openReports: reports
+    users, listings, activeListings: active, blockedListings: blocked, openReports: reports,
+    dailyListings: daily,
+    categories: categories.map(category => ({ name: category.name, count: category._count.listings }))
   });
 }));
 

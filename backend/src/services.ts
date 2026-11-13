@@ -10,6 +10,9 @@ export async function listListings(query: Record<string, unknown>) {
   if (query.q) where.OR = [{ title: { contains: String(query.q), mode: "insensitive" } }, { description: { contains: String(query.q), mode: "insensitive" } }];
   if (query.categoryId) where.categoryId = String(query.categoryId);
   if (query.city) where.city = { contains: String(query.city), mode: "insensitive" };
+  if (query.condition && ["NEW", "LIKE_NEW", "GOOD", "FAIR"].includes(String(query.condition))) {
+    where.condition = String(query.condition);
+  }
   const orderBy = query.sort === "oldest" ? { createdAt: "asc" } : { createdAt: "desc" };
   const [items, total] = await Promise.all([
     prisma.listing.findMany({ where, include: { owner: { select: { id: true, name: true } }, category: true, images: true }, orderBy: orderBy as any, skip: (page-1)*limit, take: limit }),
