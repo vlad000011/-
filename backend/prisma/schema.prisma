@@ -16,6 +16,7 @@ enum RoleName {
 enum ListingStatus {
   ACTIVE
   HIDDEN
+  BLOCKED
   EXCHANGED
 }
 
@@ -81,6 +82,7 @@ model Listing {
   images ListingImage[]
   favorites Favorite[]
   reports Report[]
+  conversations Conversation[]
   @@index([title])
   @@index([categoryId, status])
   @@index([createdAt])
@@ -107,7 +109,9 @@ model Conversation {
   createdAt DateTime @default(now())
   members ConversationMember[]
   messages Message[]
-  @@unique([id])
+  listingId String?
+  listing Listing? @relation(fields: [listingId], references: [id], onDelete: SetNull)
+  @@index([listingId])
 }
 
 model ConversationMember {

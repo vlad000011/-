@@ -200,7 +200,7 @@ app.get("/api/listings/:id", wrap(async (req, res) => {
     }
   });
 
-  if (!item || item.status === "HIDDEN") {
+  if (!item || item.status !== "ACTIVE") {
     return res.status(404).json({ error: "Объявление не найдено" });
   }
 
@@ -373,7 +373,7 @@ app.post("/api/me/password", requireAuth, wrap(async (req: AuthRequest, res) => 
 app.get("/api/me/listings", requireAuth, wrap(async (req: AuthRequest, res) =>
   res.json(await prisma.listing.findMany({
     where: { ownerId: req.user!.id },
-    include: { category: true, images: true },
+    include: { owner: { select: { id: true, name: true } }, category: true, images: true },
     orderBy: { createdAt: "desc" }
   }))
 ));
@@ -430,37 +430,36 @@ app.delete("/api/favorites/:listingId", requireAuth, wrap(async (req: AuthReques
   res.json({ saved: false });
 }));
 
-// CONVERSATIONS
+// CONVERSATIONS — one conversation per listing and its two participants
 
 app.post("/api/conversations", requireAuth, wrap(async (req: AuthRequest, res) => {
-  const { recipientId } = z.object({
-    recipientId: z.string()
-  }).parse(req.body);
-
-  if (recipientId === req.user!.id) {
-    return res.status(400).json({ error: "Нельзя создать диалог с собой" });
+  const { listingId } = z.object({ listingId: z.string().min(1) }).parse(req.body);
+  const listing = await prisma.listing.findUnique({
+    where: { id: listingId },
+    select: { id: true, ownerId: true, status: true }
+  });
+  if (!listing || listing.status !== "ACTIVE") {
+    return res.status(404).json({ error: "Активное объявление не найдено" });
+  }
+  if (listing.ownerId === req.user!.id) {
+    return res.status(400).json({ error: "Нельзя написать самому себе" });
   }
 
   const existing = await prisma.conversation.findFirst({
     where: {
+      listingId: listing.id,
       AND: [
         { members: { some: { userId: req.user!.id } } },
-        { members: { some: { userId: recipientId } } }
+        { members: { some: { userId: listing.ownerId } } }
       ]
     }
   });
-
   const conversation = existing || await prisma.conversation.create({
     data: {
-      members: {
-        create: [
-          { userId: req.user!.id },
-          { userId: recipientId }
-        ]
-      }
+      listingId: listing.id,
+      members: { create: [{ userId: req.user!.id }, { userId: listing.ownerId }] }
     }
   });
-
   res.status(existing ? 200 : 201).json(conversation);
 }));
 
@@ -468,26 +467,19 @@ app.get("/api/conversations", requireAuth, wrap(async (req: AuthRequest, res) =>
   res.json(await prisma.conversation.findMany({
     where: { members: { some: { userId: req.user!.id } } },
     include: {
+      listing: { select: { id: true, title: true, status: true } },
       members: { include: { user: { select: { id: true, name: true } } } },
       messages: { orderBy: { createdAt: "desc" }, take: 1 }
-    }
+    },
+    orderBy: { createdAt: "desc" }
   }))
 ));
 
 app.get("/api/conversations/:id/messages", requireAuth, wrap(async (req: AuthRequest, res) => {
   const member = await prisma.conversationMember.findUnique({
-    where: {
-      conversationId_userId: {
-        conversationId: req.params.id,
-        userId: req.user!.id
-      }
-    }
+    where: { conversationId_userId: { conversationId: req.params.id, userId: req.user!.id } }
   });
-
-  if (!member) {
-    return res.status(403).json({ error: "Нет доступа" });
-  }
-
+  if (!member) return res.status(403).json({ error: "Нет доступа к этому диалогу" });
   res.json(await prisma.message.findMany({
     where: { conversationId: req.params.id },
     include: { sender: { select: { id: true, name: true } } },
@@ -497,28 +489,12 @@ app.get("/api/conversations/:id/messages", requireAuth, wrap(async (req: AuthReq
 
 app.post("/api/conversations/:id/messages", requireAuth, wrap(async (req: AuthRequest, res) => {
   const member = await prisma.conversationMember.findUnique({
-    where: {
-      conversationId_userId: {
-        conversationId: req.params.id,
-        userId: req.user!.id
-      }
-    }
+    where: { conversationId_userId: { conversationId: req.params.id, userId: req.user!.id } }
   });
-
-  if (!member) {
-    return res.status(403).json({ error: "Нет доступа" });
-  }
-
-  const { body } = z.object({
-    body: z.string().min(1).max(2000)
-  }).parse(req.body);
-
+  if (!member) return res.status(403).json({ error: "Нет доступа к этому диалогу" });
+  const { body } = z.object({ body: z.string().trim().min(1).max(2000) }).parse(req.body);
   res.status(201).json(await prisma.message.create({
-    data: {
-      body,
-      conversationId: req.params.id,
-      senderId: req.user!.id
-    },
+    data: { body, conversationId: req.params.id, senderId: req.user!.id },
     include: { sender: { select: { id: true, name: true } } }
   }));
 }));
@@ -534,7 +510,7 @@ app.post("/api/listings/:id/reports", requireAuth, wrap(async (req: AuthRequest,
     where: { id: req.params.id },
     select: { id: true, ownerId: true, status: true }
   });
-  if (!listing || listing.status === "HIDDEN") {
+  if (!listing || listing.status !== "ACTIVE") {
     return res.status(404).json({ error: "Объявление не найдено" });
   }
   if (listing.ownerId === req.user!.id) {
@@ -563,7 +539,7 @@ app.post("/api/listings/:id/reports", requireAuth, wrap(async (req: AuthRequest,
 app.get("/api/moderation/reports", requireAuth, allowRoles("MODERATOR", "ADMIN"), wrap(async (_req, res) =>
   res.json(await prisma.report.findMany({
     include: {
-      listing: true,
+      listing: { include: { owner: { select: { id: true, name: true, email: true } } } },
       reporter: { select: { id: true, name: true, email: true } }
     },
     orderBy: { createdAt: "desc" }
@@ -582,6 +558,24 @@ app.patch("/api/moderation/reports/:id", requireAuth, allowRoles("MODERATOR", "A
 
   await audit(req.user!.id, "REPORT_UPDATE", report.id);
   res.json(report);
+}));
+
+// BLOCKED LISTINGS
+app.get("/api/moderation/listings/blocked", requireAuth, allowRoles("MODERATOR", "ADMIN"), wrap(async (_req, res) =>
+  res.json(await prisma.listing.findMany({
+    where: { status: "BLOCKED" },
+    include: { owner: { select: { id: true, name: true, email: true } }, category: true },
+    orderBy: { updatedAt: "desc" }
+  }))
+));
+
+app.patch("/api/moderation/listings/:id/block", requireAuth, allowRoles("MODERATOR", "ADMIN"), wrap(async (req: AuthRequest, res) => {
+  const listing = await prisma.listing.findUnique({ where: { id: req.params.id } });
+  if (!listing) return res.status(404).json({ error: "Объявление не найдено" });
+  const updated = await prisma.listing.update({ where: { id: listing.id }, data: { status: "BLOCKED" } });
+  await prisma.report.updateMany({ where: { listingId: listing.id, status: "OPEN" }, data: { status: "REVIEWED" } });
+  await audit(req.user!.id, "LISTING_BLOCK", listing.id);
+  res.json(updated);
 }));
 
 // ADMIN
